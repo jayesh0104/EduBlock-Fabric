@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>EduBlock | Blockchain Audit Trail</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 font-sans">
+
+    <div id="loginOverlay" class="fixed inset-0 bg-slate-900/80 flex items-center justify-center z-50">
+        <div class="bg-white p-8 rounded-2xl shadow-2xl w-96">
+            <h2 class="text-2xl font-bold mb-6 text-blue-700 text-center">EduBlock Login</h2>
+            <input id="user" type="text" placeholder="Username" class="w-full p-3 border rounded-lg mb-3">
+            <input id="pass" type="password" placeholder="Password" class="w-full p-3 border rounded-lg mb-6">
+            <button onclick="login()" class="w-full bg-blue-600 text-white py-3 rounded-lg font-bold">Sign In</button>
+        </div>
+    </div>
+
+    <nav class="bg-blue-800 p-4 text-white shadow-lg flex justify-between px-10">
+        <div class="font-bold text-xl">EduBlock <span id="roleLabel" class="text-xs font-normal bg-blue-600 px-2 py-1 rounded ml-2 uppercase"></span></div>
+        <button onclick="location.reload()" class="text-sm opacity-70 hover:opacity-100">Logout</button>
+    </nav>
+
+    <div class="container mx-auto p-8 grid grid-cols-1 lg:grid-cols-2 gap-10">
+        
+        <div id="adminPanel" class="hidden bg-white p-8 rounded-2xl shadow-sm border-t-8 border-blue-600">
+            <h2 class="text-xl font-bold mb-6">Issuer Control</h2>
+            <div class="space-y-4">
+                <input id="certId" placeholder="Cert ID" class="w-full p-3 bg-gray-50 border rounded-lg">
+                <input id="studentName" placeholder="Student Name" class="w-full p-3 bg-gray-50 border rounded-lg">
+                <input id="course" placeholder="Course Name" class="w-full p-3 bg-gray-50 border rounded-lg">
+                <div class="grid grid-cols-2 gap-4">
+                    <button onclick="issueCert()" class="bg-blue-600 text-white py-3 rounded-xl font-bold">Mint</button>
+                    <button onclick="revokeCert()" class="bg-red-500 text-white py-3 rounded-xl font-bold">Revoke</button>
+                </div>
+                <p id="adminStatus" class="text-sm text-center font-medium"></p>
+            </div>
+        </div>
+
+        <div class="bg-white p-8 rounded-2xl shadow-sm border-t-8 border-green-500">
+            <h2 class="text-xl font-bold mb-6">Verification Portal</h2>
+            <div class="flex space-x-2 mb-8">
+                <input id="vId" placeholder="Enter Certificate ID" class="flex-1 p-3 border rounded-lg">
+                <button onclick="verifyCert()" class="bg-green-600 text-white px-8 rounded-lg font-bold">Verify</button>
+            </div>
+
+            <div id="displayCard" class="hidden border rounded-2xl p-6 bg-slate-50 relative overflow-hidden">
+                <div id="statusBadge" class="absolute top-4 right-4 text-xs font-black px-3 py-1 rounded-full bg-white shadow-sm"></div>
+                <h3 id="resName" class="text-2xl font-bold text-slate-800"></h3>
+                <p id="resCourse" class="text-blue-600 font-medium"></p>
+                <div class="mt-4 text-xs text-slate-500 border-t pt-4 space-y-2">
+                    <p>Issuer: <span id="resIssuer" class="text-slate-700 font-bold"></span></p>
+                    <p>Issued On: <span id="resDate" class="text-slate-700 font-bold"></span></p>
+                    
+                    <button onclick="fetchHistory()" class="mt-4 text-blue-600 font-bold underline block">📜 View History & Timestamps</button>
+                    <div id="historyTimeline" class="hidden mt-4 space-y-2 max-h-60 overflow-y-auto"></div>
+                </div>
+            </div>
+            <p id="verifyError" class="text-red-500 text-center mt-4 hidden font-bold">ID Not Found on Ledger</p>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = "http://localhost:3000";
+        let authToken = "";
+
+        async function login() {
+            const user = document.getElementById('user').value;
+            const pass = document.getElementById('pass').value;
+            const res = await fetch(`${API_BASE}/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: user, password: pass })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                authToken = data.token;
+                document.getElementById('loginOverlay').classList.add('hidden');
+                document.getElementById('roleLabel').innerText = data.role;
+                if (data.role === 'ADMIN') document.getElementById('adminPanel').classList.remove('hidden');
+            } else { alert("Wrong credentials"); }
+        }
+
+        async function issueCert() {
+            const status = document.getElementById('adminStatus');
+            const res = await fetch(`${API_BASE}/issue`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': authToken },
+                body: JSON.stringify({
+                    id: document.getElementById('certId').value,
+                    name: document.getElementById('studentName').value,
+                    course: document.getElementById('course').value,
+                    issuer: "NCVET India",
+                    date: new Date().toISOString().split('T')[0]
+                })
+            });
+            status.innerText = res.ok ? "Success: Minted to Block" : "Error: Duplicate or Unauthorized";
+            status.className = res.ok ? "text-green-600 font-bold text-center mt-2" : "text-red-600 font-bold text-center mt-2";
+        }
+
+        async function revokeCert() {
+            const id = document.getElementById('certId').value;
+            const res = await fetch(`${API_BASE}/revoke`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': authToken },
+                body: JSON.stringify({ id })
+            });
+            document.getElementById('adminStatus').innerText = res.ok ? "Status: Revoked" : "Error: Not Found";
+        }
+
+        async function verifyCert() {
+            const id = document.getElementById('vId').value;
+            const card = document.getElementById('displayCard');
+            const err = document.getElementById('verifyError');
+            card.classList.add('hidden'); err.classList.add('hidden');
+            
+            try {
+                const res = await fetch(`${API_BASE}/verify/${id}`);
+                const data = await res.json();
+                document.getElementById('resName').innerText = data.studentName;
+                document.getElementById('resCourse').innerText = data.course;
+                document.getElementById('resIssuer').innerText = data.issuer;
+                document.getElementById('resDate').innerText = data.date;
+                const badge = document.getElementById('statusBadge');
+                badge.innerText = data.status;
+                badge.className = `absolute top-4 right-4 text-[10px] font-black px-3 py-1 rounded-full shadow-sm ${data.status === 'VALID' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`;
+                card.classList.remove('hidden');
+            } catch (e) { err.classList.remove('hidden'); }
+        }
+
+        async function fetchHistory() {
+            const id = document.getElementById('vId').value;
+            const timeline = document.getElementById('historyTimeline');
+            timeline.classList.remove('hidden');
+            timeline.innerHTML = "Fetching...";
+            
+            const res = await fetch(`${API_BASE}/history/${id}`);
+            const history = await res.json();
+            
+            timeline.innerHTML = history.map(item => `
+                <div class="p-3 bg-white border-l-4 rounded shadow-sm ${item.data.status === 'VALID' ? 'border-green-400' : 'border-red-400'}">
+                    <p class="font-bold text-slate-700">${item.data.status}</p>
+                    <p class="text-[10px] text-slate-500">${new Date(item.timestamp.seconds * 1000).toLocaleString()}</p>
+                    <p class="text-[9px] font-mono opacity-50">TX: ${item.txId.substring(0,12)}...</p>
+                </div>
+            `).reverse().join('');
+        }
+    </script>
+</body>
+</html>
