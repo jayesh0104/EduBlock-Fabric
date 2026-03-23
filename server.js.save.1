@@ -1,0 +1,77 @@
+const express = require('express');
+const { Gateway, Wallets } = require('fabric-network');
+const path = require('path');
+const fs = require('fs');
+const cors = require('cors');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const SECRET_KEY = "fabric_secret_key";
+
+const app = express();
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
+app.use(cors());
+
+const channelName = 'mychannel';
+const chaincodeName = 'certcc';
+const mspId = 'Org1MSP';
+const walletPath = path.join(__dirname, 'wallet');
+const users = [
+    { username: 'admin', password: '123', role: 'ADMIN' },
+    { username: 'staff', password: '123', role: 'EMPLOYEE' }
+];
+
+
+
+async function getGateway() {
+    const ccpPath = path.resolve(__dirname, '..', 'test-network', 'organizations', 'peerOrganizations', 'org1.example.com', 'connection-org1.json');
+    const ccp = JSON.parse(fs.readFileSync(ccpPath, 'utf8'));
+    const wallet = await Wallets.newFileSystemWallet(walletPath);
+    
+    const gateway = new Gateway();
+    await gateway.connect(ccp, { wallet, identity: 'appUser', discovery: { enabled: true, asLocalhost: true } });
+    return gateway;
+}
+
+// Endpoint to Issue
+app.post('/issue', async (req, res) => {
+    try {
+        const { id, name, course, issuer, date } = req.body;
+        const gateway = await getGateway();
+        const network = await gateway.getNetwork(channelName);
+        const contract = network.getContract(chaincodeName);
+        await contract.submitTransaction('issueCertificate', id, name, course, issuer, date);
+        res.status(200).send({ message: 'Certificate Issued Successfully' });
+        await gateway.disconnect();
+    } catch (error) { res.status(500).send(error.toString()); }
+});
+
+// Endpoint to Verify
+app.get('/verify/:id', async (req, res) => {
+    try {
+        const gateway = await getGateway();
+        const network = await gateway.getNetwork(channelName);
+        const contract = network.getContract(chaincodeName);
+        const result = await contract.evaluateTransaction('verifyCertificate', req.params.id);
+        res.status(200).json(JSON.parse(result.toString()));
+        await gateway.disconnect();
+    } catch (error) { res.status(404).send("Certificate Not Found"); }
+});
+app.get('/history/:id', async (req, res) => {
+    try {
+        const gateway = await getGateway();
+        const network = await gateway.getNetwork('mychannel');
+        const contract = network.getContract('certcc');
+        const result = await contract.evaluateTransaction('getHistory', req.params.id);
+        res.status(200).json(JSON.parse(result.toString()));
+        await gateway.disconnect();
+    } catch (error) {
+        res.status(500).send("History not found");
+    }
+});
+
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.listen(3000, () => console.log('API running on http://localhost:3000'));
